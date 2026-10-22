@@ -1,0 +1,39 @@
+name: Sync upstream safely
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Merge upstream and protect persisted state
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/xiaoyang111222/cn-math-taxonomy.git
+          git fetch upstream main
+          BASE=$(git merge-base HEAD upstream/main)
+          # Storage and resume changes require a compatibility review.
+          if git diff "$BASE" upstream/main -- diagnose/app.js diagnose/engine.js | grep -E '^[+-].*(localStorage|session\.v|JSON\.parse|JSON\.stringify|removeItem|clear\(|replay|migrat)' ; then
+            echo "::error::Upstream changes persisted state or resume behavior; review before deploying."
+            exit 1
+          fi
+          git merge --no-edit upstream/main
+          node tests/test_engine.js
+          python3 scripts/validate.py
+          bash scripts/build-personal.sh
+          git push origin HEAD:main
